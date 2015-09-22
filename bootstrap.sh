@@ -18,6 +18,11 @@ apt-get update
 which curl > /dev/null || apt-get install -qq -y curl
 [[ $(lsb_release -sr) == "12.04" ]] && apt-get install -qq -y python-software-properties
 
+debian_or_ubuntu() {
+  export DEBIAN_CODE_NAME=$(lsb_release -sc)
+  [[ $(lsb_release -si) == "Debian" ]] && return 0 || return 1
+}
+
 dokku_install_source() {
   apt-get install -qq -y git make software-properties-common
   cd /root
@@ -35,7 +40,11 @@ dokku_install_package() {
   curl -sSL https://get.docker.io/gpg | apt-key add -
   curl -sSL https://packagecloud.io/gpg.key | apt-key add -
 
-  echo "deb http://get.docker.io/ubuntu docker main" > /etc/apt/sources.list.d/docker.list
+  if debian_or_ubuntu; then
+    echo "deb http://http.debian.net/debian ${DEBIAN_CODE_NAME}-backports main" > /etc/apt/sources.list.d/${DEBIAN_CODE_NAME}-backports.list
+  else
+    echo "deb http://get.docker.io/ubuntu docker main" > /etc/apt/sources.list.d/docker.list
+  fi
   echo "deb https://packagecloud.io/dokku/dokku/ubuntu/ trusty main" > /etc/apt/sources.list.d/dokku.list
 
   sudo apt-get update > /dev/null
