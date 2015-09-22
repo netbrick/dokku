@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
+[[ " backup:export backup:import help backup:help " == *" $1 "* ]] || exit $DOKKU_NOT_IMPLEMENTED_EXIT
 set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
-
-CURRENT_BACKUP_VERSION=1
 
 case "$1" in
   backup:export)
+    CURRENT_BACKUP_VERSION=1
     OUTPUT_FILE="$2"
     BACKUP_DIR="$DOKKU_ROOT"
 
     BACKUP_TMP_DIR=$(mktemp -d)
     BACKUP_TMP_FILE="$BACKUP_TMP_DIR/backup.tar"
 
-    : | pluginhook backup-export 1 $BACKUP_DIR | tar -cf $BACKUP_TMP_FILE --files-from -
+    : | plugn trigger backup-export 1 $BACKUP_DIR | tar -cf $BACKUP_TMP_FILE --files-from -
 
     pushd $BACKUP_DIR > /dev/null
     find . -maxdepth 1 -type d -not -name . | sed 's:./::g' > "$BACKUP_TMP_DIR/.dokku_backup_apps"
@@ -50,14 +50,12 @@ case "$1" in
     tar xf $INPUT_FILE --directory=$BACKUP_TMP_DIR
 
     if [[ ! -f $BACKUP_TMP_DIR/.dokku_backup_version ]]; then
-      echo "Unable to determine backup version"
-      exit 1
+      dokku_log_fail "Unable to determine backup version"
     fi
 
     VERSION=$(< $BACKUP_TMP_DIR/.dokku_backup_version)
     if [[ $VERSION -ne 1 ]]; then
-      echo "Unknown format version $VERSION"
-      exit 1
+      dokku_log_fail "Unknown format version $VERSION"
     fi
 
     echo "Importing a version $VERSION backup..."
@@ -65,12 +63,11 @@ case "$1" in
     BACKUP_ROOT="$BACKUP_TMP_DIR""$DOKKU_ROOT"
     TARGET_DIR="$DOKKU_ROOT"
 
-    if ! pluginhook backup-check $VERSION "$BACKUP_ROOT" "$TARGET_DIR" "$BACKUP_TMP_DIR/.dokku_backup_apps"; then
+    if ! plugn trigger backup-check $VERSION "$BACKUP_ROOT" "$TARGET_DIR" "$BACKUP_TMP_DIR/.dokku_backup_apps"; then
       if $force; then
         echo "-f used. Ignoring warnings."
       else
-        echo "Archive did not pass sanity checks. Use -f to import anyway" >&2
-        exit 1
+        dokku_log_fail "Archive did not pass sanity checks. Use -f to import anyway"
       fi
     fi
 
@@ -78,7 +75,7 @@ case "$1" in
     while read app; do mkdir "$TARGET_DIR/$app"; echo "Imported $app"; done < $BACKUP_TMP_DIR/.dokku_backup_apps
 
     # have the plugins import their stuff
-    pluginhook backup-import $VERSION "$BACKUP_ROOT" $TARGET_DIR "$BACKUP_TMP_DIR/.dokku_backup_apps"
+    plugn trigger backup-import $VERSION "$BACKUP_ROOT" $TARGET_DIR "$BACKUP_TMP_DIR/.dokku_backup_apps"
 
     rm -rf $BACKUP_TMP_DIR
 
@@ -86,9 +83,9 @@ case "$1" in
     ;;
 
   help | backup:help)
-    cat && cat<<EOF
-    backup:export [file]                            Export dokku configuration files
-    backup:import [file]                            Import dokku configuration files
+    cat<<EOF
+    backup:export [file], Export dokku configuration files
+    backup:import [file], Import dokku configuration files
 EOF
     ;;
 

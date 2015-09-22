@@ -1,7 +1,7 @@
 # -*- mode: ruby -*-
 # vi: set ft=ruby :
 
-BOX_NAME = ENV["BOX_NAME"] || "chef/ubuntu-14.04"
+BOX_NAME = ENV["BOX_NAME"] || "bento/ubuntu-14.04"
 BOX_MEMORY = ENV["BOX_MEMORY"] || "1024"
 DOKKU_DOMAIN = ENV["DOKKU_DOMAIN"] || "dokku.me"
 DOKKU_IP = ENV["DOKKU_IP"] || "10.0.0.2"
@@ -46,7 +46,10 @@ Vagrant::configure("2") do |config|
   end
 
   config.vm.define "build", autostart: false do |vm|
-    vm.vm.provision :shell, :inline => "DEBIAN_FRONTEND=noninteractive apt-get -qq -y install git > /dev/null && cd /root/dokku && #{make_cmd}"
+    vm.vm.network :forwarded_port, guest: 80, host: FORWARDED_PORT
+    vm.vm.hostname = "#{DOKKU_DOMAIN}"
+    vm.vm.network :private_network, ip: DOKKU_IP
+    vm.vm.provision :shell, :inline => "apt-get update > /dev/null && DEBIAN_FRONTEND=noninteractive apt-get -qq -y install git > /dev/null && cd /root/dokku && #{make_cmd}"
     vm.vm.provision :shell, :inline => "cd /root/dokku && make deb-all"
   end
 

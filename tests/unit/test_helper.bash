@@ -2,11 +2,17 @@
 
 # constants
 DOKKU_ROOT=${DOKKU_ROOT:=~dokku}
+DOKKU_LIB_ROOT=${DOKKU_LIB_PATH:="/var/lib/dokku"}
+PLUGIN_PATH=${PLUGIN_PATH:="$DOKKU_LIB_ROOT/plugins"}
+PLUGIN_AVAILABLE_PATH=${PLUGIN_AVAILABLE_PATH:="$PLUGIN_PATH/available"}
+PLUGIN_ENABLED_PATH=${PLUGIN_ENABLED_PATH:="$PLUGIN_PATH/enabled"}
+PLUGIN_CORE_PATH=${PLUGIN_CORE_PATH:="$DOKKU_LIB_ROOT/core-plugins"}
+PLUGIN_CORE_AVAILABLE_PATH=${PLUGIN_CORE_AVAILABLE_PATH:="$PLUGIN_CORE_PATH/available"}
 TEST_APP=my-cool-guy-test-app
 
 # test functions
 flunk() {
-  { if [ "$#" -eq 0 ]; then cat -
+  { if [[ "$#" -eq 0 ]]; then cat -
     else echo "$*"
     fi
   }
@@ -14,23 +20,23 @@ flunk() {
 }
 
 assert_success() {
-  if [ "$status" -ne 0 ]; then
+  if [[ "$status" -ne 0 ]]; then
     flunk "command failed with exit status $status"
-  elif [ "$#" -gt 0 ]; then
+  elif [[ "$#" -gt 0 ]]; then
     assert_output "$1"
   fi
 }
 
 assert_failure() {
-  if [ "$status" -eq 0 ]; then
+  if [[ "$status" -eq 0 ]]; then
     flunk "expected failed exit status"
-  elif [ "$#" -gt 0 ]; then
+  elif [[ "$#" -gt 0 ]]; then
     assert_output "$1"
   fi
 }
 
 assert_equal() {
-  if [ "$1" != "$2" ]; then
+  if [[ "$1" != "$2" ]]; then
     { echo "expected: $1"
       echo "actual:   $2"
     } | flunk
@@ -39,34 +45,36 @@ assert_equal() {
 
 assert_output() {
   local expected
-  if [ $# -eq 0 ]; then expected="$(cat -)"
-  else expected="$1"
+  if [[ $# -eq 0 ]]; then
+    expected="$(cat -)"
+  else
+    expected="$1"
   fi
   assert_equal "$expected" "$output"
 }
 
 assert_line() {
-  if [ "$1" -ge 0 ] 2>/dev/null; then
+  if [[ "$1" -ge 0 ]] 2>/dev/null; then
     assert_equal "$2" "${lines[$1]}"
   else
     local line
     for line in "${lines[@]}"; do
-      if [ "$line" = "$1" ]; then return 0; fi
+      [[ "$line" = "$1" ]] && return 0
     done
     flunk "expected line \`$1'"
   fi
 }
 
 refute_line() {
-  if [ "$1" -ge 0 ] 2>/dev/null; then
+  if [[ "$1" -ge 0 ]] 2>/dev/null; then
     local num_lines="${#lines[@]}"
-    if [ "$1" -lt "$num_lines" ]; then
+    if [[ "$1" -lt "$num_lines" ]]; then
       flunk "output has $num_lines lines"
     fi
   else
     local line
     for line in "${lines[@]}"; do
-      if [ "$line" = "$1" ]; then
+      if [[ "$line" = "$1" ]]; then
         flunk "expected to not find line \`$line'"
       fi
     done
@@ -167,20 +175,20 @@ custom_ssl_nginx_template() {
   [[ -z "$APP" ]] && APP="$TEST_APP"
 cat<<EOF > $DOKKU_ROOT/$APP/nginx.conf.template
 server {
-  listen      [::]:80;
-  listen      80;
+  listen      [::]:\$NGINX_PORT;
+  listen      \$NGINX_PORT;
   server_name \$NOSSL_SERVER_NAME;
-  return 301 https://\$SSL_SERVER_NAME\\\$request_uri;
+  return 301 https://\\\$host:\$NGINX_SSL_PORT\\\$request_uri;
 }
 
 server {
-  listen      [::]:443 ssl spdy;
-  listen      443 ssl spdy;
+  listen      [::]:\$NGINX_SSL_PORT ssl spdy;
+  listen      \$NGINX_SSL_PORT ssl spdy;
   server_name \$SSL_SERVER_NAME;
 \$SSL_DIRECTIVES
 
   keepalive_timeout   70;
-  add_header          Alternate-Protocol  443:npn-spdy/2;
+  add_header          Alternate-Protocol  \$NGINX_SSL_PORT:npn-spdy/2;
   location    / {
     proxy_pass  http://\$APP;
     proxy_http_version 1.1;
@@ -202,8 +210,8 @@ custom_nginx_template() {
   [[ -z "$APP" ]] && APP="$TEST_APP"
 cat<<EOF > $DOKKU_ROOT/$APP/nginx.conf.template
 server {
-  listen      [::]:80;
-  listen      80;
+  listen      [::]:\$NGINX_PORT;
+  listen      \$NGINX_PORT;
   server_name \$NOSSL_SERVER_NAME;
 
   location    / {

@@ -1,15 +1,15 @@
-# Pluginhooks
+# Plugin triggers
 
-[Pluginhooks](https://github.com/progrium/pluginhook) are a good way to jack into existing dokku infrastructure. You can use them to modify the output of various dokku commands or override internal configuration.
+[Plugin triggers](https://github.com/progrium/plugn) (formerly [pluginhooks](https://github.com/progrium/pluginhook)) are a good way to jack into existing dokku infrastructure. You can use them to modify the output of various dokku commands or override internal configuration.
 
-Pluginhooks are simply scripts that are executed by the system. You can use any language you want, so long as the script:
+Plugin triggers are simply scripts that are executed by the system. You can use any language you want, so long as the script:
 
 - Is executable
 - Has the proper language requirements installed
 
-For instance, if you wanted to write a pluginhook in PHP, you would need to have `php` installed and available on the CLI prior to pluginhook invocation.
+For instance, if you wanted to write a plugin trigger in PHP, you would need to have `php` installed and available on the CLI prior to plugin trigger invocation.
 
-The following is an example for the `nginx-hostname` pluginhook. It reverses the hostname that is provided to nginx during deploys. If you created an executable file named `nginx-hostname` with the following code in your plugin, it would be invoked by dokku during the normal app deployment process:
+The following is an example for the `nginx-hostname` plugin trigger. It reverses the hostname that is provided to nginx during deploys. If you created an executable file named `nginx-hostname` with the following code in your plugin trigger, it would be invoked by dokku during the normal app deployment process:
 
 ```shell
 #!/usr/bin/env bash
@@ -21,18 +21,18 @@ NEW_SUBDOMAIN=`echo $SUBDOMAIN | rev`
 echo "$NEW_SUBDOMAIN.$VHOST"
 ```
 
-## Available Pluginhooks
+## Available plugin triggers
 
-There are a number of plugin-related pluginhooks. These can be optionally implemented by plugins and allow integration into the standard dokku plugin setup/backup/teardown process.
+There are a number of plugin-related triggers. These can be optionally implemented by plugins and allow integration into the standard dokku setup/backup/teardown process.
 
-The following pluginhooks describe those available to a dokku installation. As well, there is an example for each pluginhook that you can use as templates for your own plugin development.
+The following plugin triggers describe those available to a dokku installation. As well, there is an example for each trigger that you can use as templates for your own plugin development.
 
-> The example pluginhook code is not guaranteed to be implemented as in within dokkku, and are merely simplified examples. Please look at the dokku source for larger, more in-depth examples.
+> The example plugin trigger code is not guaranteed to be implemented as in within dokkku, and are merely simplified examples. Please look at the dokku source for larger, more in-depth examples.
 
 ### `install`
 
 - Description: Used to setup any files/configuration for a plugin.
-- Invoked by: `dokku plugins-install`.
+- Invoked by: `dokku plugin:install`.
 - Arguments: None
 - Example:
 
@@ -50,8 +50,8 @@ fi
 
 ### `dependencies`
 
-- Description: Used to install system-level dependencies. Invoked by `plugins-install-dependencies`.
-- Invoked by: `dokku plugins-install-dependencies`
+- Description: Used to install system-level dependencies. Invoked by `plugin:install-dependencies`.
+- Invoked by: `dokku plugin:install-dependencies`
 - Arguments: None
 - Example:
 
@@ -77,13 +77,13 @@ esac
 ### `update`
 
 - Description: Can be used to run plugin updates on a regular interval. You can schedule the invoker in a cron-task to ensure your system gets regular updates.
-- Invoked by: `dokku plugins-update`.
+- Invoked by: `dokku plugin:update`.
 - Arguments: None
 - Example:
 
 ```shell
 #!/usr/bin/env bash
-# Update the buildstep image from git source
+# Update the herokuish image from git source
 
 set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
 
@@ -93,7 +93,7 @@ sudo BUILD_STACK=true make install
 
 ### `commands help`
 
-- Description: Used to aggregate all plugin `help` output. Your plugin should implement a `help` command in your `commands` file to take advantage of this pluginhook. This must be implemented inside the `commands` pluginhook file.
+- Description: Used to aggregate all plugin `help` output. Your plugin should implement a `help` command in your `commands` file to take advantage of this plugin trigger. This must be implemented inside the `commands` plugin file.
 - Invoked by: `dokku help`
 - Arguments: None
 - Example:
@@ -106,9 +106,9 @@ set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
 
 case "$1" in
   help | derp:help)
-    cat && cat<<EOF
-    derp:herp                                       Herps the derp
-    derp:serp [file]                                Shows the file's serp
+    cat<<EOF
+    derp:herp, Herps the derp
+    derp:serp [file], Shows the file's serp
 EOF
     ;;
 
@@ -121,7 +121,7 @@ esac
 
 ### `backup-export`
 
-- Description: Used to backup files for a given plugin. If your plugin writes files to disk, this pluginhook should be used to echo out their full paths. Any files listed will be copied by the backup plugin to the backup tar.gz.
+- Description: Used to backup files for a given plugin. If your plugin writes files to disk, this plugin trigger should be used to echo out their full paths. Any files listed will be copied by the backup plugin to the backup tar.gz.
 - Invoked by: `dokku backup:export`
 - Arguments: `$VERSION $DOKKU_ROOT`
 - Example:
@@ -180,9 +180,9 @@ for file in */REDIRECT; do
 done
 ```
 
-### `pre-build-buildstep`
+### `pre-build-buildpack`
 
-- Description: Allows you to run commands before the build image is created for a given app. For instance, this can be useful to add env vars to your container. Only applies to applications using buildstep.
+- Description: Allows you to run commands before the build image is created for a given app. For instance, this can be useful to add env vars to your container. Only applies to applications using buildpacks.
 - Invoked by: `dokku build`
 - Arguments: `$APP`
 - Example:
@@ -195,9 +195,9 @@ set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
 # TODO
 ```
 
-### `post-build-buildstep`
+### `post-build-buildpack`
 
-- Description: Allows you to run commands after the build image is create for a given app. Only applies to applications using buildstep.
+- Description: Allows you to run commands after the build image is create for a given app. Only applies to applications using buildpacks.
 - Invoked by: `dokku build`
 - Arguments: `$APP`
 - Example:
@@ -240,11 +240,11 @@ set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
 # TODO
 ```
 
-### `pre-release-buildstep`
+### `pre-release-buildpack`
 
-- Description: Allows you to run commands before environment variables are set for the release step of the deploy. Only applies to applications using buildstep.
+- Description: Allows you to run commands before environment variables are set for the release step of the deploy. Only applies to applications using buildpacks.
 - Invoked by: `dokku release`
-- Arguments: `$APP`
+- Arguments: `$APP $IMAGE_TAG`
 - Example:
 
 ```shell
@@ -252,8 +252,9 @@ set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
 # Installs the graphicsmagick package into the container
 
 set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
-
-source "$(dirname $0)/../common/functions"
+source "$PLUGIN_CORE_AVAILABLE_PATH/common/functions"
+APP="$1"; IMAGE_TAG="$2"; IMAGE=$(get_app_image_name $APP $IMAGE_TAG)
+verify_app_name "$APP"
 
 dokku_log_info1" Installing GraphicsMagick..."
 
@@ -266,11 +267,11 @@ test $(docker wait $ID) -eq 0
 docker commit $ID $IMAGE > /dev/null
 ```
 
-### `post-release-buildstep`
+### `post-release-buildpack`
 
-- Description: Allows you to run commands after environment variables are set for the release step of the deploy. Only applies to applications using buildstep.
+- Description: Allows you to run commands after environment variables are set for the release step of the deploy. Only applies to applications using buildpacks.
 - Invoked by: `dokku release`
-- Arguments: `$APP`
+- Arguments: `$APP $IMAGE_TAG`
 - Example:
 
 ```shell
@@ -278,8 +279,9 @@ docker commit $ID $IMAGE > /dev/null
 # Installs a package specified by the `CONTAINER_PACKAGE` env var
 
 set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
-
-source "$(dirname $0)/../common/functions"
+source "$PLUGIN_CORE_AVAILABLE_PATH/common/functions"
+APP="$1"; IMAGE_TAG="$2"; IMAGE=$(get_app_image_name $APP $IMAGE_TAG)
+verify_app_name "$APP"
 
 dokku_log_info1" Installing $CONTAINER_PACKAGE..."
 
@@ -296,13 +298,16 @@ docker commit $ID $IMAGE > /dev/null
 
 - Description: Allows you to run commands before environment variables are set for the release step of the deploy. Only applies to applications using a dockerfile.
 - Invoked by: `dokku release`
-- Arguments: `$APP`
+- Arguments: `$APP $IMAGE_TAG`
 - Example:
 
 ```shell
 #!/usr/bin/env bash
 
 set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
+source "$PLUGIN_CORE_AVAILABLE_PATH/common/functions"
+APP="$1"; IMAGE_TAG="$2"; IMAGE=$(get_app_image_name $APP $IMAGE_TAG)
+verify_app_name "$APP"
 
 # TODO
 ```
@@ -311,13 +316,16 @@ set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
 
 - Description: Allows you to run commands after environment variables are set for the release step of the deploy. Only applies to applications using a dockerfile.
 - Invoked by: `dokku release`
-- Arguments: `$APP`
+- Arguments: `$APP $IMAGE_TAG`
 - Example:
 
 ```shell
 #!/usr/bin/env bash
 
 set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
+source "$PLUGIN_CORE_AVAILABLE_PATH/common/functions"
+APP="$1"; IMAGE_TAG="$2"; IMAGE=$(get_app_image_name $APP $IMAGE_TAG)
+verify_app_name "$APP"
 
 # TODO
 ```
@@ -335,10 +343,11 @@ set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
 # `DOKKU_DISABLE_DEPLOY` env var is set to `true` for an app
 
 set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
+source "$PLUGIN_AVAILABLE_PATH/config/functions"
 
 CONTAINERID="$1"; APP="$2"; PORT="$3" ; HOSTNAME="${4:-localhost}"
 
-[[ -f "$DOKKU_ROOT/$APP/ENV" ]] && source $DOKKU_ROOT/$APP/ENV
+eval "$(config_export app $APP)"
 DOKKU_DISABLE_DEPLOY="${DOKKU_DISABLE_DEPLOY:-false}"
 
 if [[ "$DOKKU_DISABLE_DEPLOY" = "true" ]]; then
@@ -351,7 +360,7 @@ fi
 
 - Description: Allows the running of code before the container's process is started.
 - Invoked by: `dokku deploy`
-- Arguments: `$APP`
+- Arguments: `$APP $IMAGE_TAG`
 - Example:
 
 ```shell
@@ -359,11 +368,9 @@ fi
 # Runs gulp in our container
 
 set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
-
-source "$(dirname $0)/../common/functions"
-
-APP="$1"
-IMAGE="dokku/$APP"
+source "$PLUGIN_CORE_AVAILABLE_PATH/common/functions"
+APP="$1"; IMAGE_TAG="$2"; IMAGE=$(get_app_image_name $APP $IMAGE_TAG)
+verify_app_name "$APP"
 
 dokku_log_info1 "Running gulp"
 id=$(docker run -d $IMAGE /bin/bash -c "cd /app && gulp default")
@@ -392,7 +399,7 @@ curl "http://httpstat.us/200"
 
 - Description: Can be used to run commands before an app is deleted.
 - Invoked by: `dokku apps:destroy`
-- Arguments: `$APP`
+- Arguments: `$APP $IMAGE_TAG`
 - Example:
 
 ```shell
@@ -400,8 +407,10 @@ curl "http://httpstat.us/200"
 # Clears out the gulp asset build cache for applications
 
 set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
+source "$PLUGIN_CORE_AVAILABLE_PATH/common/functions"
 
-APP="$1"; IMAGE="dokku/$APP"; GULP_CACHE_DIR="$DOKKU_ROOT/$APP/gulp"
+APP="$1"; GULP_CACHE_DIR="$DOKKU_ROOT/$APP/gulp"; IMAGE=$(get_app_image_name $APP $IMAGE_TAG)
+verify_app_name "$APP"
 
 if [[ -d $GULP_CACHE_DIR ]]; then
   docker run --rm -v "$GULP_CACHE_DIR:/gulp" "$IMAGE" find /gulp -depth -mindepth 1 -maxdepth 1 -exec rm -Rf {} \; || true
@@ -412,7 +421,7 @@ fi
 
 - Description: Can be used to run commands after an application is deleted.
 - Invoked by: `dokku apps:destroy`
-- Arguments: `$APP`
+- Arguments: `$APP $IMAGE_TAG`
 - Example:
 
 ```shell
@@ -446,13 +455,16 @@ set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
 
 - Description:
 - Invoked by: `dokku deploy`
-- Arguments: `$APP`
+- Arguments: `$APP $IMAGE_TAG`
 - Example:
 
 ```shell
 #!/usr/bin/env bash
 
 set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
+source "$PLUGIN_CORE_AVAILABLE_PATH/common/functions"
+APP="$1"; IMAGE_TAG="$2"; IMAGE=$(get_app_image_name $APP $IMAGE_TAG)
+verify_app_name "$APP"
 
 # TODO
 ```
@@ -461,13 +473,16 @@ set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
 
 - Description:
 - Invoked by: `dokku run`
-- Arguments: `$APP`
+- Arguments: `$APP $IMAGE_TAG`
 - Example:
 
 ```shell
 #!/usr/bin/env bash
 
 set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
+source "$PLUGIN_CORE_AVAILABLE_PATH/common/functions"
+APP="$1"; IMAGE_TAG="$2"; IMAGE=$(get_app_image_name $APP $IMAGE_TAG)
+verify_app_name "$APP"
 
 # TODO
 ```
@@ -588,4 +603,80 @@ set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
 APP="$1"; REV="$2"
 
 dokku hg-build $APP $REV
+```
+
+### `receive-branch`
+
+- Description: Allows you to customize what occurs when a specific branch is received. Can be used to add support for specific branch names
+- Invoked by: `dokku git-hook`, `dokku ps:rebuild`
+- Arguments: `$APP $REV $REFNAME`
+- Example:
+
+```shell
+#!/bin/bash
+# Gives dokku the ability to support multiple branches for a given service
+# Allowing you to have multiple staging environments on a per-branch basis
+
+reference_app=$1
+refname=$3
+newrev=$2
+APP=${refname/*\//}.$reference_app
+
+if [[ ! -d "$DOKKU_ROOT/$APP" ]]; then
+  REFERENCE_REPO="$DOKKU_ROOT/$reference_app
+  git clone --bare --shared --reference "$REFERENCE_REPO" "$REFERENCE_REPO" "$DOKKU_ROOT/$APP" > /dev/null
+fi
+plugn trigger receive-app $APP $newrev
+```
+
+### `tags-create`
+
+- Description: Allows you to run commands once a tag for an application image has been added
+- Invoked by: `dokku tags:create`
+- Arguments: `$APP $IMAGE_TAG`
+- Example:
+
+```shell
+#!/usr/bin/env bash
+# Upload an application image to docker hub
+
+set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
+APP="$1"; IMAGE_TAG="$2"; IMAGE=$(get_app_image_name $APP $IMAGE_TAG)
+
+IMAGE_ID=$(docker inspect --format '{{ .Id }}' $IMAGE)
+docker tag -f $IMAGE_ID $DOCKER_HUB_USER/$APP:$IMAGE_TAG
+docker push $DOCKER_HUB_USER/$APP:$IMAGE_TAG
+```
+
+### `tags-destroy`
+
+- Description: Allows you to run commands once a tag for an application image has been removed
+- Invoked by: `dokku tags:destroy`
+- Arguments: `$APP $IMAGE_TAG`
+- Example:
+
+```shell
+#!/usr/bin/env bash
+# Remove an image tag from docker hub
+
+set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
+APP="$1"; IMAGE_TAG="$2"
+
+some code to remove a docker hub tag because it's not implemented in the CLI....
+```
+
+### `retire-container-failed`
+
+- Description: Allows you to run commands if/when retiring old containers has failed
+- Invoked by: `dokku deploy`
+- Arguments: `$APP`
+- Example:
+
+```shell
+#!/usr/bin/env bash
+
+set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
+APP="$1"; HOSTNAME=$(hostname -s)
+
+mail -s "$APP containers on $HOSTNAME failed to retire" ops@co.com
 ```

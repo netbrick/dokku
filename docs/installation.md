@@ -3,8 +3,10 @@
 ## Requirements
 
 - A fresh VM running Ubuntu `14.04 x64`
+- At least `1GB` of system memory ([workaround for 512MB machines](http://progrium.viewdocs.io/dokku/advanced-installation))
+- The VM should have a FQDN set before installation (check by running `sudo hostname -f`).
 
-Ubuntu 14.04 x64 x64. Ideally have a domain ready to point to your host. It's designed for and is probably best to use a fresh VM. The bootstrapper will install everything it needs.
+Ubuntu 14.04 x64. Ideally have a domain ready to point to your host. It's designed for and is probably best to use a fresh VM. The bootstrapper will install everything it needs.
 
 ## Installing the latest Stable version
 
@@ -12,10 +14,11 @@ To install the latest stable version of dokku, you can run the following bootstr
 
 ```shell
 # installs dokku via apt-get
-wget https://raw.github.com/progrium/dokku/v0.3.18/bootstrap.sh
-sudo DOKKU_TAG=v0.3.18 bash bootstrap.sh
+wget https://raw.github.com/progrium/dokku/v0.4.0/bootstrap.sh
+sudo DOKKU_TAG=v0.4.0 bash bootstrap.sh
 
-# Go to your server's IP and follow the web installer
+# By default, this will do cli-based setup, though you may *also*
+# go to your server's IP and follow the web installer
 ```
 
 For various reasons, certain hosting providers may have other steps that should be preferred to the above. If hosted on any of the following popular hosts, please follow the linked to instructions:

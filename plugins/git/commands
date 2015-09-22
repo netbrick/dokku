@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
-source "$(dirname $0)/../common/functions"
+source "$PLUGIN_CORE_AVAILABLE_PATH/common/functions"
 
 git_build_app_repo() {
   verify_app_name "$1"
@@ -23,7 +23,7 @@ git_build_app_repo() {
   if [[ -f Dockerfile ]] && [[ "$([[ -f .env ]] && grep -q BUILDPACK_URL .env; echo $?)" != "0" ]] && [[ ! -f ".buildpacks" ]]; then
     dokku receive "$APP" "dockerfile" "$TMP_WORK_DIR" | sed -u "s/^/"$'\e[1G'"/"
   else
-    dokku receive "$APP" "buildstep" "$TMP_WORK_DIR" | sed -u "s/^/"$'\e[1G'"/"
+    dokku receive "$APP" "herokuish" "$TMP_WORK_DIR" | sed -u "s/^/"$'\e[1G'"/"
   fi
 }
 
@@ -31,25 +31,28 @@ case "$1" in
   git-hook)
     APP=$2
 
-    while read oldrev newrev refname
-    do
+    while read oldrev newrev refname; do
       # Only run this script for the master branch. You can remove this
       # if block if you wish to run it for others as well.
-      if [[ $refname = "refs/heads/master" ]] ; then
-        # broken out into pluginhook so we might support other methods to receive an app
-        pluginhook receive-app $APP $newrev
+      if [[ $refname = "refs/heads/master" ]]; then
+        # broken out into plugin so we might support other methods to receive an app
+        plugn trigger receive-app $APP $newrev
       else
-        echo $'\e[1G\e[K'"-----> WARNING: deploy did not complete, you must push to master."
-        echo $'\e[1G\e[K'"-----> for example, try 'git push <dokku> ${refname/refs\/heads\/}:master'"
+        if test -f "$PLUGIN_PATH"/enabled/*/receive-branch; then
+          plugn trigger receive-branch $APP $newrev $refname
+        else
+          echo $'\e[1G\e[K'"-----> WARNING: deploy did not complete, you must push to master."
+          echo $'\e[1G\e[K'"-----> for example, try 'git push <dokku> ${refname/refs\/heads\/}:master'"
+        fi
       fi
     done
     ;;
 
   git-upload-pack)
     APP="$(echo $2 | perl -pe 's/(?<!\\)'\''//g' | sed 's/\\'\''/'\''/g')"
-    pluginhook git-pre-pull $APP
+    plugn trigger git-pre-pull $APP
     cat | git-upload-pack "$DOKKU_ROOT/$APP"
-    pluginhook git-post-pull $APP
+    plugn trigger git-post-pull $APP
     ;;
 
   git-build)
@@ -63,7 +66,7 @@ case "$1" in
 
   git-build-locked)
     APP="$2"
-    if [[ $# -ge 3 ]];then
+    if [[ $# -ge 3 ]]; then
       REF="$3"
     else
       REF=$(< "$DOKKU_ROOT/$APP/refs/heads/master")
@@ -96,7 +99,7 @@ EOF
     ;;
 
   help | git:help)
-    cat
+    echo -n ""
     ;;
 
   *)

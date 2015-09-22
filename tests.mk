@@ -65,7 +65,7 @@ lint:
 	# SC2001: See if you can use ${variable//search/replace} instead. - https://github.com/koalaman/shellcheck/wiki/SC2001
 	@echo linting...
 	@$(QUIET) shellcheck -e SC2029 ./contrib/dokku_client.sh
-	@$(QUIET) find . -not -path '*/\.*' | xargs file | egrep "shell|bash" | grep -v directory | awk '{ print $$1 }' | sed 's/://g' | grep -v dokku_client.sh | xargs shellcheck -e SC2034,SC2086,SC2143,SC2001
+	@$(QUIET) find . -not -path '*/\.*' | xargs file | egrep "shell|bash" | egrep -v "directory|toml" | awk '{ print $$1 }' | sed 's/://g' | grep -v dokku_client.sh | xargs shellcheck -e SC2034,SC2086,SC2143,SC2001
 
 unit-tests:
 	@echo running unit tests...
@@ -74,6 +74,10 @@ ifndef UNIT_TEST_BATCH
 else
 	@$(QUIET) ./tests/ci/unit_test_runner.sh $$UNIT_TEST_BATCH
 endif
+
+deploy-test-checks-root:
+	@echo deploying checks-root app...
+	cd tests && ./test_deploy ./apps/checks-root dokku.me '' true
 
 deploy-test-clojure:
 	@echo deploying config app...
@@ -115,6 +119,10 @@ deploy-test-nodejs-express-noprocfile:
 	@echo deploying nodejs-express app with no Procfile...
 	cd tests && ./test_deploy ./apps/nodejs-express-noprocfile dokku.me
 
+deploy-test-nodejs-worker:
+	@echo deploying nodejs-worker app...
+	cd tests && ./test_deploy ./apps/nodejs-worker dokku.me
+
 deploy-test-php:
 	@echo deploying php app...
 	cd tests && ./test_deploy ./apps/php dokku.me
@@ -137,6 +145,7 @@ deploy-test-static:
 
 deploy-tests:
 	@echo running deploy tests...
+	@$(QUIET) $(MAKE) deploy-test-checks-root
 	@$(QUIET) $(MAKE) deploy-test-config
 	@$(QUIET) $(MAKE) deploy-test-clojure
 	@$(QUIET) $(MAKE) deploy-test-dockerfile
@@ -147,6 +156,7 @@ deploy-tests:
 	@$(QUIET) $(MAKE) deploy-test-multi
 	@$(QUIET) $(MAKE) deploy-test-nodejs-express
 	@$(QUIET) $(MAKE) deploy-test-nodejs-express-noprocfile
+	@$(QUIET) $(MAKE) deploy-test-nodejs-worker
 	@$(QUIET) $(MAKE) deploy-test-php
 	@$(QUIET) $(MAKE) deploy-test-python-flask
 	@$(QUIET) $(MAKE) deploy-test-scala

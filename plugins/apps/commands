@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
+[[ " apps apps:create apps:destroy help apps:help " == *" $1 "* ]] || exit $DOKKU_NOT_IMPLEMENTED_EXIT
 set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
-source "$(dirname $0)/../common/functions"
+source "$PLUGIN_CORE_AVAILABLE_PATH/common/functions"
 
 case "$1" in
   apps)
@@ -9,8 +10,8 @@ case "$1" in
     ;;
 
   apps:create)
-    [[ -z $2 ]] && echo "Please specify an app to run the command on" && exit 1
-    [[ -d "$DOKKU_ROOT/$2" ]] && dokku_log_warn "Name is already taken" && exit 1
+    [[ -z $2 ]] && dokku_log_fail "Please specify an app to run the command on"
+    [[ -d "$DOKKU_ROOT/$2" ]] && dokku_log_fail "Name is already taken"
     APP="$2"
 
     mkdir -p "$DOKKU_ROOT/$APP"
@@ -18,12 +19,12 @@ case "$1" in
     ;;
 
   apps:destroy)
-    [[ -z $2 ]] && echo "Please specify an app to run the command on" && exit 1
-    verify_app_name "$2"
-    [[ "$2" == "tls" ]] && echo "Unable to destroy tls directory" && exit 1
-    APP="$2"; IMAGE="dokku/$APP"
-
+    [[ -z $2 ]] && dokku_log_fail "Please specify an app to run the command on"
+    [[ "$2" == "tls" ]] && dokku_log_fail "Unable to destroy tls directory"
     [[ "$3" == "force" ]] && DOKKU_APPS_FORCE_DELETE=1
+    APP="$2"; IMAGE_TAG=$(get_running_image_tag $APP)
+    verify_app_name "$APP"
+
     if [[ -z "$DOKKU_APPS_FORCE_DELETE" ]]; then
       dokku_log_warn "WARNING: Potentially Destructive Action"
       dokku_log_warn "This command will destroy $APP (including all add-ons)."
@@ -32,32 +33,29 @@ case "$1" in
 
       read -p "> " app_name
       if [[ "$app_name" != "$APP" ]]; then
-        dokku_log_warn "Confirmation did not match $APP. Aborted."
-        exit 1
+        dokku_log_fail "Confirmation did not match $APP. Aborted."
       fi
     fi
 
     echo "Destroying $APP (including all add-ons)"
 
-    pluginhook pre-delete $APP
-    DOKKU_APP_CIDS=$(get_container_ids $APP)
+    plugn trigger pre-delete $APP $IMAGE_TAG
+    DOKKU_APP_CIDS=$(get_app_container_ids $APP)
     if [[ -n $DOKKU_APP_CIDS ]]; then
-      for ID in $DOKKU_APP_CIDS;do
+      for ID in $DOKKU_APP_CIDS; do
         docker stop $ID > /dev/null || true
         docker rm $ID  > /dev/null || true
       done
     fi
 
-    docker images | grep $IMAGE | awk '{print $3}' | xargs docker rmi &> /dev/null &
-
-    pluginhook post-delete $APP
+    plugn trigger post-delete $APP $IMAGE_TAG
     ;;
 
   help | apps:help)
-    cat && cat<<EOF
-    apps                                            List your apps
-    apps:create <app>                               Create a new app
-    apps:destroy <app>                              Permanently destroy an app
+    cat<<EOF
+    apps, List your apps
+    apps:create <app>, Create a new app
+    apps:destroy <app>, Permanently destroy an app
 EOF
     ;;
 

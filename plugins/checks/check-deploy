@@ -35,7 +35,8 @@
 #
 
 set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
-source "$(dirname $0)/../common/functions"
+source "$PLUGIN_CORE_AVAILABLE_PATH/common/functions"
+source "$PLUGIN_AVAILABLE_PATH/config/functions"
 
 APP="$1"; DOKKU_APP_CONTAINER_ID="$2"; DOKKU_APP_CONTAINER_TYPE="$3"; DOKKU_APP_LISTEN_PORT="$4"; DOKKU_APP_LISTEN_IP="$5"
 if [[ -z "$DOKKU_APP_LISTEN_PORT" ]] && [[ -f "$DOKKU_ROOT/$APP/PORT" ]]; then
@@ -45,14 +46,14 @@ if [[ -z "$DOKKU_APP_LISTEN_IP" ]] && [[ -f "$DOKKU_ROOT/$APP/IP" ]]; then
   DOKKU_APP_LISTEN_IP=$(< "$DOKKU_ROOT/$APP/IP")
 fi
 if [[ -z "$DOKKU_APP_CONTAINER_ID" ]]; then
-  DOKKU_APP_CIDS=( $(get_container_ids $APP) )
+  DOKKU_APP_CIDS=( $(get_app_container_ids $APP) )
   DOKKU_APP_CONTAINER_ID=${DOKKU_APP_CIDS[0]}
 fi
 
 
 # source global and in-app envs to get DOKKU_CHECKS_WAIT and any other necessary vars
-[[ -f "$DOKKU_ROOT/ENV" ]] && source $DOKKU_ROOT/ENV
-[[ -f "$DOKKU_ROOT/$APP/ENV" ]] && source $DOKKU_ROOT/$APP/ENV
+eval "$(config_export global)"
+eval "$(config_export app $APP)"
 
 # Wait this many seconds (default 5) for server to start before running checks.
 WAIT="${DOKKU_CHECKS_WAIT:-5}"
@@ -79,6 +80,10 @@ cleanup() {
 trap cleanup EXIT
 
 if [[ ! -s "${TMPDIR}/CHECKS" ]] || [[ "$DOKKU_APP_CONTAINER_TYPE" != "web" ]]; then
+  if [[ "$DOKKU_SKIP_DEFAULT_CHECKS" = "true" ]]; then
+    dokku_log_verbose "Skipping default check..."
+    exit 0
+  fi
   dokku_log_verbose "For more efficient zero downtime deployments, create a file CHECKS."
   dokku_log_verbose "See http://progrium.viewdocs.io/dokku/checks-examples.md for examples"
   dokku_log_verbose "CHECKS file not found in container: Running simple container check..."
@@ -87,23 +92,29 @@ if [[ ! -s "${TMPDIR}/CHECKS" ]] || [[ "$DOKKU_APP_CONTAINER_TYPE" != "web" ]]; 
 
   # simple default check to see if the container stuck around
   # for more thorough checks, create a CHECKS file
-  DOKKU_DEFAULT_WAIT=10
-  dokku_log_info1 "Waiting for $DOKKU_DEFAULT_WAIT seconds ..."
-  sleep $DOKKU_DEFAULT_WAIT
+  DOKKU_DEFAULT_CHECKS_WAIT="${DOKKU_DEFAULT_CHECKS_WAIT:-10}"
+  dokku_log_info1 "Waiting for $DOKKU_DEFAULT_CHECKS_WAIT seconds ..."
+  sleep $DOKKU_DEFAULT_CHECKS_WAIT
 
-  docker ps -q --no-trunc | grep -q "$DOKKU_APP_CONTAINER_ID" || dokku_log_fail "App container failed to start!!"
+  ! (is_container_running $DOKKU_APP_CONTAINER_ID) && dokku_log_fail "App container failed to start!!"
+  container_restarts=$(docker inspect -f "{{ .RestartCount }}" $DOKKU_APP_CONTAINER_ID)
+  if [[ $container_restarts -ne 0 ]]; then
+    docker stop "$DOKKU_APP_CONTAINER_ID" || true
+    dokku_log_fail "App container failed to start!!"
+  fi
+
   dokku_log_info1 "Default container check successful!" && exit 0
 fi
 
 # Reads name/value pairs, sets the WAIT and TIMEOUT variables
 exec < "$FILENAME"
-while read LINE ; do
+while read LINE; do
   # Name/value pair
-  if [[ "$LINE" =~ ^.+= ]] ; then
+  if [[ "$LINE" =~ ^.+= ]]; then
     TRIM=${LINE%#*}
     NAME=${TRIM%=*}
     VALUE=${TRIM#*=}
-    [[ "$NAME" = "WAIT" ]]    && WAIT=$VALUE
+    [[ "$NAME" = "WAIT" ]] && WAIT=$VALUE
     [[ "$NAME" = "TIMEOUT" ]] && TIMEOUT=$VALUE
     [[ "$NAME" = "ATTEMPTS" ]] && ATTEMPTS=$VALUE
   fi
@@ -125,24 +136,29 @@ do
   # --location   Follow redirects
   CURL_OPTIONS="-q --compressed --fail --location --max-time $TIMEOUT"
 
+  # Set X-Forwarded-Proto header if TLS is enabled.
+  SSL="$DOKKU_ROOT/$APP/tls"; WILDCARD_SSL="$DOKKU_ROOT/tls"
+  if [[ -e "$SSL/server.crt" && -e "$SSL/server.key" ]] || [[ -e "$WILDCARD_SSL/server.crt" && -e "$WILDCARD_SSL/server.key" ]]; then
+    CURL_OPTIONS+=" -H X-Forwarded-Proto:https"
+  fi
 
   exec < "$FILENAME"
-  while read CHECK_URL EXPECTED ; do
+  while read CHECK_URL EXPECTED; do
     # Ignore empty lines and lines starting with #
     # shellcheck disable=SC1001
     [[ -z "$CHECK_URL" || "$CHECK_URL" =~ ^\# ]] && continue
     # Ignore if it's not a URL in a supported format
     # shellcheck disable=SC1001
-    ! [[ "$CHECK_URL" =~ ^(http(s)?:)?\/.+ ]] && continue
+    ! [[ "$CHECK_URL" =~ ^(http(s)?:)?\/.* ]] && continue
 
-    if [[ "$CHECK_URL" =~ ^https?: ]] ; then
+    if [[ "$CHECK_URL" =~ ^https?: ]]; then
       URL_PROTOCOL=${CHECK_URL%:*}
       CHECK_URL=${CHECK_URL#*:}
     else
       URL_PROTOCOL="http"
     fi
 
-    if [[ "$CHECK_URL" =~ ^//.+ ]] ; then
+    if [[ "$CHECK_URL" =~ ^//.+ ]]; then
       # To test a URL with specific host name, we still make request to localhost,
       # but we set Host header to $SEND_HOST.
       #
@@ -168,9 +184,9 @@ do
     [[ $DOKKU_TRACE ]] && dokku_log_verbose "$ curl $CURL_ARGS"
 
     # Capture HTTP response or CURL error message
-    if OUTPUT=$(curl -# $CURL_ARGS 2>&1) ; then
+    if OUTPUT=$(curl -# $CURL_ARGS 2>&1); then
       # OUTPUT contains the HTTP response
-      if [[ ! "$OUTPUT" =~ $EXPECTED ]] ; then
+      if [[ ! "$OUTPUT" =~ $EXPECTED ]]; then
         dokku_log_warn "$LOG_URL: expected to but did not find: \"$EXPECTED\""
         FAILEDCHECKS=$(( FAILEDCHECKS + 1 ))
       fi
@@ -181,7 +197,7 @@ do
     fi
   done
 
-  if [ $FAILEDCHECKS -gt 0 ]; then
+  if [[ $FAILEDCHECKS -gt 0 ]]; then
       dokku_log_warn "Check attempt $ATTEMPT/$ATTEMPTS failed."
       SUCCESS=0
   else
@@ -189,7 +205,7 @@ do
   fi
 done
 
-if [ $FAILEDCHECKS -gt 0 ]; then
+if [[ $FAILEDCHECKS -gt 0 ]]; then
     dokku_log_fail "Could not start due to $FAILEDCHECKS failed checks."
     exit 1
 fi

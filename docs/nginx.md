@@ -2,15 +2,35 @@
 
 Dokku uses nginx as it's server for routing requests to specific applications. By default, access and error logs are written for each app to `/var/log/nginx/${APP}-access.log` and `/var/log/nginx/${APP}-error.log` respectively
 
+```
+nginx:access-logs <app> [-t]                                       Show the nginx access logs for an application (-t follows)
+nginx:build-config <app>                                           (Re)builds nginx config for given app
+nginx:disable <app>                                                disable nginx for an application (forces container binding to external interface)
+nginx:enable <app>                                                 enable nginx for an application
+nginx:error-logs <app> [-t]                                        Show the nginx error logs for an application (-t follows)
+```
+
 ## TLS/SPDY support
 
 Dokku provides easy TLS/SPDY support out of the box. This can be done app-by-app or for all subdomains at once. Note that whenever TLS support is enabled SPDY is also enabled.
 
+### SSL Configuration
+
+In 0.4.0, SSL Configuration has been replaced by the [`certs` plugin](http://progrium.viewdocs.io/dokku/deployment/ssl-configuration)). For users of dokku 0.3.x, please refer to the following sections.
+
 ### Per App
 
-To enable TLS connection to to one of your applications, copy or symlink the `.crt` and `.key` files into the application's `/home/dokku/:app/tls` folder (create this folder if it doesn't exist) as `server.crt` and `server.key` respectively.
+To enable TLS connections to to one of your applications, do the following:
 
-Redeployment of the application will be needed to apply TLS configuration. Once it is redeployed, the application will be accessible by `https://` (redirection from `http://` is applied as well).
+* Create a key file and a cert file.
+ * You can find detailed steps for generating a self-signed certificate at https://devcenter.heroku.com/articles/ssl-certificate-self
+ * If you are not paranoid and need it just for a DEV or STAGING app, you can use http://www.selfsignedcertificate.com/ to generate your 2 files more easily.
+* Rename your files to server.key and server.crt
+* tar these 2 files together, *without* subdirectories. Example: tar cvf cert-key.tar server.crt server.key
+* Install the pair for your app, like this: ssh dokku@ip-of-your-dokku-server nginx:import-ssl < cert-key.tar
+
+You will need to repeat the steps above for each domain used to serve your app. You can't simply create a single tar with all key/cert files in it (see https://github.com/progrium/dokku/issues/1195).
+
 
 ### All Subdomains
 
@@ -41,15 +61,41 @@ You can import ssl certificates via tarball using the following command:
 dokku nginx:import-ssl myapp < archive-of-certs.tar
 ```
 
-This archive should is expanded via `tar xvf`. It should contain `server.crt` and `server.key`.
+This archive is expanded via `tar xvf`. It should contain `server.crt` and `server.key`.
+
+
+## Running behind a load balancer
+
+> New as of 0.3.17
+
+Your application has access to the HTTP headers `X-Forwarded-Proto`, `X-Forwarded-For` and `X-Forwarded-Port`. These headers indicate the protocol of the original request (HTTP or HTTPS), the port number, and the IP address of the client making the request, respectively. The default configuration is for Nginx to set these headers.
+
+If your server runs behind an HTTP/S load balancer, then Nginx will see all requests as coming from the load balancer. If your load balancer sets the `X-Forwarded-` headers, you can tell Nginx to pass these headers from load balancer to your application by setting the `DOKKU_SSL_TERMINATED` environment variable:
+
+```shell
+dokku config:set myapp DOKKU_SSL_TERMINATED=1
+```
+
+Only use this option if:
+1. All requests are terminated at the load balancer, and forwarded to Nginx
+2. The load balancer is configured to send the `X-Forwarded-` headers (this may be off by default)
+
+If it's possible to make HTTP/S requests directly to Nginx, bypassing the load balancer, or if the load balancer is not configured to set these headers, then it becomes possible for a client to set these headers to arbitrary values.
+
+This could result in security issue, for example, if your application looks at the value of the `X-Forwarded-Proto` to determine if the request was made over HTTPS.
+
 
 ## Customizing the nginx configuration
 
-> New as of 0.3.10
+> New as of 0.4.0.
 
-Dokku currently templates out an nginx configuration that is included in the `nginx-vhosts` plugin. If you'd like to provide a custom template for your application, you should copy the existing template - ssl or non-ssl - into your `$DOKKU_ROOT/$APP` directory at the file `nginx.conf.template`.
+Dokku currently templates out an nginx configuration that is included in the `nginx-vhosts` plugin. If you'd like to provide a custom template for your application, you should copy the existing template - ssl or non-ssl - into your application repository's root directory as the file `nginx.conf.template`. The next time you deploy, Nginx will use your template instead of the default.
 
-For instance - assuming defaults - to customize the nginx template in use for the `myapp` application, create a file at `/home/dokku/myapp/nginx.conf.template` with the following contents:
+> New as of 0.3.10.
+
+You may also place this file on disk at the path `/home/dokku/myapp/nginx.conf.template`. If placed on disk on the dokku server, the template file **must** be owned by the user `dokku:dokku`.
+
+For instance - assuming defaults - to customize the nginx template in use for the `myapp` application, create the file `nginx.conf.template` in your repo or on disk with the with the following contents:
 
 ```
 server {
@@ -77,13 +123,28 @@ server {
 }
 ```
 
-The above is a sample http configuration that adds an `X-Served-By` header to requests. The template file **must** be owned by the user `dokku:dokku`.
+The above is a sample http configuration that adds an `X-Served-By` header to requests.
 
 A few tips for custom nginx templates:
 
 - Special characters - dollar signs, spaces inside of quotes, etc. - should be escaped with a single backslash or can cause deploy failures.
 - Templated files will be validated via `nginx -t`.
 - Application environment variables can be used within your nginx configuration.
+
+After your changes a `dokku deploy myapp` will regenerate the `/home/dokku/myapp/nginx.conf` file which is then used.
+
+### Customizing via configuration files included by the default templates
+
+The default nginx.conf- templates will include everything from your apps `nginx.conf.d/` subdirectory in the main `server {}` block (see above):
+
+    include $DOKKU_ROOT/$APP/nginx.conf.d/*.conf;
+
+. That means you can put additional configuration in separate files, for example to limit the uploaded body size to 50 megabytes, do
+
+    mkdir /home/dokku/myapp/nginx.conf.d/
+    echo 'client_max_body_size 50M;' > /home/dokku/myapp/nginx.conf.d/upload.conf
+    chown dokku:dokku /home/dokku/myapp/nginx.conf.d/upload.conf
+    service nginx reload
 
 ## Customizing hostnames
 
@@ -95,7 +156,7 @@ scheme://subdomain.domain.tld
 
 The `subdomain` is inferred from the pushed application name, while the `domain` is set during initial configuration in the `$DOKKU_ROOT/VHOST` file.
 
-You can optionally override this in a plugin by implementing the `nginx-hostname` pluginhook. For example, you can reverse the subdomain with the following sample `nginx-hostname` pluginhook:
+You can optionally override this in a plugin by implementing the `nginx-hostname` plugin trigger. For example, you can reverse the subdomain with the following sample `nginx-hostname` plugin trigger:
 
 ```shell
 #!/usr/bin/env bash
@@ -113,13 +174,13 @@ You can also use the built-in `domains` plugin to handle:
 
 ### Disabling VHOSTS
 
-If desired, it is possible to disable vhosts by setting the `NO_VHOST` environment variable:
+If desired, it is possible to disable vhosts by setting the environment variable `NO_VHOST=1`:
 
 ```shell
 dokku config:set myapp NO_VHOST=1
 ```
 
-On subsequent deploys, the nginx virtualhost will be discarded. This is useful when deploying internal-facing services that should not be publicly routeable.
+On subsequent deploys, the nginx virtualhost will be discarded. This is useful when deploying internal-facing services that should not be publicly routeable. As of 0.4.0, nginx will still be configured to proxy your app on some random high port. This allows internal services to maintain the same port between deployments. You may change this port by setting `DOKKU_NGINX_PORT` and/or `DOKKU_NGINX_SSL_PORT` (for services configured to use SSL.)
 
 ### Domains plugin
 

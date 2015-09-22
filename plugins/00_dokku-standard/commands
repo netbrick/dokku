@@ -1,51 +1,48 @@
 #!/usr/bin/env bash
+[[ " build release trace delete ls logs run url urls version help " == *" $1 "* ]] || exit $DOKKU_NOT_IMPLEMENTED_EXIT
 set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
-source "$(dirname $0)/../common/functions"
+source "$PLUGIN_CORE_AVAILABLE_PATH/common/functions"
+source "$PLUGIN_AVAILABLE_PATH/config/functions"
+source "$PLUGIN_AVAILABLE_PATH/nginx-vhosts/functions"
 
 case "$1" in
   build)
-    APP="$2"; IMAGE="dokku/$APP"; IMAGE_SOURCE_TYPE="$3"; TMP_WORK_DIR="$4"
+    APP="$2"; IMAGE_SOURCE_TYPE="$3"; TMP_WORK_DIR="$4"; IMAGE=$(get_app_image_name $APP)
+    verify_app_name "$APP"
+
     CACHE_DIR="$DOKKU_ROOT/$APP/cache"
 
-    [[ -f "$DOKKU_ROOT/$APP/ENV" ]] && source "$DOKKU_ROOT/$APP/ENV"
+    eval "$(config_export app $APP)"
     pushd "$TMP_WORK_DIR" &> /dev/null
 
     case "$IMAGE_SOURCE_TYPE" in
-      buildstep)
+      herokuish)
         id=$(tar -c . | docker run -i -a stdin $DOKKU_IMAGE /bin/bash -c "mkdir -p /app && tar -xC /app")
         test "$(docker wait $id)" -eq 0
         docker commit $id $IMAGE > /dev/null
         [[ -d $CACHE_DIR ]] || mkdir $CACHE_DIR
-        # *DEPRECATED* in v0.4.0: `pluginhook pre-build` will be removed in future releases
-        pluginhook pre-build "$APP"
-        pluginhook pre-build-buildstep "$APP"
+        plugn trigger pre-build-buildpack "$APP"
 
-        # *DEPRECATED* in v0.3.14: `pluginhook docker-args` will be removed in future releases
-        # https://github.com/progrium/dokku/issues/896 & https://github.com/progrium/dokku/issues/906
-        DOCKER_ARGS=$(: | pluginhook docker-args $APP build)
-        DOCKER_ARGS+=$(: | pluginhook docker-args-build $APP)
-        id=$(docker run -d -v $CACHE_DIR:/cache -e CACHE_PATH=/cache $DOCKER_ARGS $IMAGE /build/builder)
+        DOCKER_ARGS=$(: | plugn trigger docker-args-build $APP)
+        [[ "$DOKKU_TRACE" ]] && DOCKER_ARGS+=" -e TRACE=true "
+        id=$(docker run -d -v $CACHE_DIR:/cache -e CACHE_PATH=/cache $DOCKER_ARGS $IMAGE /build)
         docker attach $id
         test "$(docker wait $id)" -eq 0
         docker commit $id $IMAGE > /dev/null
 
-        # *DEPRECATED* in v0.4.0: `pluginhook post-build` will be removed in future releases
-        pluginhook post-build "$APP"
-        pluginhook post-build-buildstep "$APP"
+        plugn trigger post-build-buildpack "$APP"
         ;;
 
       dockerfile)
         # extract first port from Dockerfile
-        DOCKERFILE_PORT=$(grep EXPOSE Dockerfile | head -1 | awk '{ print $2 }' || true)
-        [[ -n "$DOCKERFILE_PORT" ]] && dokku config:set-norestart $APP DOKKU_DOCKERFILE_PORT=$DOCKERFILE_PORT
-
-        # buildstep pluginhooks don't necessarily make sense for dockerfiles. call the new breed!!!
-        pluginhook pre-build-dockerfile "$APP"
+        DOCKERFILE_PORT=$(get_dockerfile_exposed_port Dockerfile)
+        [[ -n "$DOCKERFILE_PORT" ]] && config_set --no-restart $APP DOKKU_DOCKERFILE_PORT=$DOCKERFILE_PORT
+        plugn trigger pre-build-dockerfile "$APP"
 
         [[ "$DOKKU_DOCKERFILE_CACHE_BUILD" == "false" ]] && DOKKU_DOCKER_BUILD_OPTS="$DOKKU_DOCKER_BUILD_OPTS --no-cache"
         docker build $DOKKU_DOCKER_BUILD_OPTS -t "$IMAGE" .
 
-        pluginhook post-build-dockerfile "$APP"
+        plugn trigger post-build-dockerfile "$APP"
         ;;
 
       *)
@@ -55,31 +52,29 @@ case "$1" in
     ;;
 
   release)
-    APP="$2"; IMAGE="dokku/$APP"; IMAGE_SOURCE_TYPE="$3"
+    APP="$2"; IMAGE_SOURCE_TYPE="$3"; IMAGE_TAG="$4"; IMAGE=$(get_app_image_name $APP $IMAGE_TAG)
+    verify_app_name "$APP"
+
     case "$IMAGE_SOURCE_TYPE" in
-      buildstep)
-        # *DEPRECATED* in v0.4.0: `pluginhook pre-release` will be removed in future releases
-        pluginhook pre-release "$APP"
-        pluginhook pre-release-buildstep "$APP"
-        if [[ -f "$DOKKU_ROOT/ENV" ]]; then
-          id=$(docker run -i -a stdin $IMAGE /bin/bash -c "mkdir -p /app/.profile.d && cat > /app/.profile.d/00-global-env.sh" < "$DOKKU_ROOT/ENV")
+      herokuish)
+        plugn trigger pre-release-buildpack "$APP" "$IMAGE_TAG"
+        if [[ -n $(config_export global) ]]; then
+          id=$(config_export global | docker run -i -a stdin $IMAGE /bin/bash -c "mkdir -p /app/.profile.d && cat > /app/.profile.d/00-global-env.sh")
           test "$(docker wait $id)" -eq 0
           docker commit $id $IMAGE > /dev/null
         fi
-        if [[ -f "$DOKKU_ROOT/$APP/ENV" ]]; then
-          id=$(docker run -i -a stdin $IMAGE /bin/bash -c "mkdir -p /app/.profile.d && cat > /app/.profile.d/01-app-env.sh" < "$DOKKU_ROOT/$APP/ENV")
+        if [[ -n $(config_export app $APP) ]]; then
+          id=$(config_export app $APP | docker run -i -a stdin $IMAGE /bin/bash -c "mkdir -p /app/.profile.d && cat > /app/.profile.d/01-app-env.sh")
           test "$(docker wait $id)" -eq 0
           docker commit $id $IMAGE > /dev/null
         fi
-        # *DEPRECATED* in v0.4.0: `pluginhook post-release` will be removed in future releases
-        pluginhook post-release "$APP"
-        pluginhook post-release-buildstep "$APP"
+        plugn trigger post-release-buildpack "$APP" "$IMAGE_TAG"
         ;;
 
       dockerfile)
-        # buildstep pluginhooks don't necessarily make sense for dockerfiles. call the new breed!!!
-        pluginhook pre-release-dockerfile "$APP"
-        pluginhook post-release-dockerfile "$APP"
+        # buildstep plugins don't necessarily make sense for dockerfiles. call the new breed!!!
+        plugn trigger pre-release-dockerfile "$APP" "$IMAGE_TAG"
+        plugn trigger post-release-dockerfile "$APP" "$IMAGE_TAG"
         ;;
 
       *)
@@ -91,8 +86,7 @@ case "$1" in
   trace)
     [[ -d $DOKKU_ROOT/.dokkurc ]] || mkdir -p $DOKKU_ROOT/.dokkurc
     [[ "$2" == "on" ]] || [[ "$2" == "off" ]] || {
-      echo "Valid trace options are [on/off]"
-      exit 1
+      dokku_log_fail "Valid trace options are [on/off]"
     }
 
     if [[ "$2" == "on" ]]; then
@@ -111,19 +105,19 @@ case "$1" in
     ;;
 
   ls)
-    dokku_apps=$(ls -d $DOKKU_ROOT/*/ 2>/dev/null) || (echo "You haven't deployed any applications yet" && exit 1)
+    dokku_apps=$(ls -d $DOKKU_ROOT/*/ 2>/dev/null) || (dokku_log_fail "You haven't deployed any applications yet")
 
     dokku_col_log_info1_quiet "App Name" "Container Type" "Container Id" "Status"
 
     for dokku_app in $dokku_apps; do
       APP=$(basename $dokku_app)
-      DOKKU_APP_CIDS=$(get_container_ids $APP)
+      DOKKU_APP_CIDS=$(get_app_container_ids $APP)
       DOCKER_RUNNING_CONTAINERS=$(docker ps -q --no-trunc)
       if [[ -n $DOKKU_APP_CIDS ]]; then
         for DOKKU_APP_CID in $DOKKU_APP_CIDS; do
           DOKKU_APP_CONTAINER_STATUS="stopped"
           [[ $DOCKER_RUNNING_CONTAINERS =~ $DOKKU_APP_CID ]] && DOKKU_APP_CONTAINER_STATUS="running"
-          DOKKU_APP_CONTAINER_TYPE=$(grep -l $DOKKU_APP_CID $DOKKU_ROOT/$APP/CONTAINER.* | awk -F. '{ print $2 }')
+          DOKKU_APP_CONTAINER_TYPE=$(grep -l $DOKKU_APP_CID $DOKKU_ROOT/$APP/CONTAINER.* | awk -F '/' '{ print $5 }' | awk -F '.' '{ print $2 }')
           dokku_col_log_msg "$APP" "$DOKKU_APP_CONTAINER_TYPE" "${DOKKU_APP_CID:0:12}" "$DOKKU_APP_CONTAINER_STATUS"
         done
       else
@@ -133,21 +127,20 @@ case "$1" in
     ;;
 
   logs)
-    [[ -z $2 ]] && echo "Please specify an app to run the command on" && exit 1
-    verify_app_name "$2"
-    APP="$2";
+    [[ -z $2 ]] && dokku_log_fail "Please specify an app to run the command on"
+    APP="$2"; verify_app_name "$2"
 
     if (is_deployed $APP); then
-      CONTAINER_IDS=( $(get_container_ids $APP) )
+      CONTAINER_IDS=( $(get_app_container_ids $APP) )
       LAST_CONTAINER_ID=${CONTAINER_IDS[${#CONTAINER_IDS[@]} - 1]}
 
       if [[ $3 == "-t" ]]; then
-        DOKKU_LOGS_ARGS="--follow"
+        DOKKU_LOGS_ARGS="--follow --tail 100"
       else
         DOKKU_LOGS_ARGS="--tail 100"
       fi
-      for CID in "${CONTAINER_IDS[@]}";do
-        if [[ "$CID" != "$LAST_CONTAINER_ID" ]];then
+      for CID in "${CONTAINER_IDS[@]}"; do
+        if [[ "$CID" != "$LAST_CONTAINER_ID" ]]; then
           DOKKU_LOGS_CMD+="docker logs $DOKKU_LOGS_ARGS $CID& "
         else
           DOKKU_LOGS_CMD+="docker logs $DOKKU_LOGS_ARGS $CID; "
@@ -160,25 +153,25 @@ case "$1" in
     ;;
 
   run)
-    [[ -z $2 ]] && echo "Please specify an app to run the command on" && exit 1
-    verify_app_name "$2"
-    APP="$2"; IMAGE="dokku/$APP"
+    [[ -z $2 ]] && dokku_log_fail "Please specify an app to run the command on"
+    APP="$2"; IMAGE_TAG=$(get_running_image_tag $APP); IMAGE=$(get_app_image_name $APP $IMAGE_TAG)
+    verify_app_name "$APP"
 
     shift 2
 
-    DOCKER_ARGS=$(: | pluginhook docker-args $APP run)
-    DOCKER_ARGS+=$(: | pluginhook docker-args-run $APP)
+    DOCKER_ARGS=$(: | plugn trigger docker-args-run $APP $IMAGE_TAG)
+    [[ "$DOKKU_TRACE" ]] && DOCKER_ARGS+=" -e TRACE=true "
     [[ $DOKKU_RM_CONTAINER ]] && DOKKU_RUN_OPTS="--rm"
     has_tty && DOKKU_RUN_OPTS+=" -i -t"
-    is_image_buildstep_based "$IMAGE" && EXEC_CMD="/exec"
+    is_image_herokuish_based "$IMAGE" && EXEC_CMD="/exec"
 
     docker run $DOKKU_RUN_OPTS $DOCKER_ARGS $IMAGE $EXEC_CMD "$@"
     ;;
 
   url | urls)
-    [[ -z $2 ]] && echo "Please specify an app to run the command on" && exit 1
-    verify_app_name "$2"
-    APP="$2";
+    [[ -z $2 ]] && dokku_log_fail "Please specify an app to run the command on"
+    APP="$2"; verify_app_name "$2"
+    eval "$(config_export app $APP)"
 
     if [[ -s "$DOKKU_ROOT/$APP/URLS" ]]; then
       case "$1" in
@@ -198,30 +191,37 @@ case "$1" in
       SCHEME="https"
     fi
 
-    if [[ -f "$DOKKU_ROOT/VHOST" ]]; then
-      echo "$SCHEME://$(< "$DOKKU_ROOT/VHOST")"
-    else
+    if [[ "$(is_app_vhost_enabled $APP)" == "false" ]]; then
       for PORT_FILE in $DOKKU_ROOT/$APP/PORT.*; do
-        echo "$SCHEME://$(< "$DOKKU_ROOT/HOSTNAME"):$(< "$PORT_FILE")"
+        echo "http://$(< "$DOKKU_ROOT/HOSTNAME"):$(< "$PORT_FILE") (container)"
       done
+
+      DOKKU_NGINX_PORT=$(config_get $APP DOKKU_NGINX_PORT || true)
+      DOKKU_NGINX_SSL_PORT=$(config_get $APP DOKKU_NGINX_SSL_PORT || true)
+
+      if [[ -n "$DOKKU_NGINX_PORT" ]]; then
+        echo "http://$(< "$DOKKU_ROOT/HOSTNAME"):$DOKKU_NGINX_PORT (nginx)"
+      fi
+      if [[ -n "$DOKKU_NGINX_SSL_PORT" ]]; then
+        echo "https://$(< "$DOKKU_ROOT/HOSTNAME"):$DOKKU_NGINX_SSL_PORT (nginx-ssl)"
+      fi
+    else
+      echo "$SCHEME://$(< "$DOKKU_ROOT/VHOST")"
     fi
   ;;
 
   version)
-    cat "$DOKKU_ROOT/VERSION" || {
-      echo "Unable to determine dokku's version" 2>&1
-      exit 1
-    }
+    cat "$DOKKU_ROOT/VERSION" || dokku_log_fail "Unable to determine dokku's version"
     ;;
 
   help)
-    cat && cat<<EOF
-    ls                                              Pretty listing of deployed applications and containers
-    logs <app> [-t]                                 Show the last logs for an application (-t follows)
-    run <app> <cmd>                                 Run a command in the environment of an application
-    url <app>                                       Show the first URL for an application (compatibility)
-    urls <app>                                      Show all URLs for an application
-    version                                         Print dokku's version
+    cat<<EOF
+    ls, Pretty listing of deployed applications and containers
+    logs <app> [-t], Show the last logs for an application (-t follows)
+    run <app> <cmd>, Run a command in the environment of an application
+    url <app>, Show the first URL for an application (compatibility)
+    urls <app>, Show all URLs for an application
+    version, Print dokku's version
 EOF
     ;;
 

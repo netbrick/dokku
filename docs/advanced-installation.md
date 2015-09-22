@@ -16,7 +16,7 @@ cd dokku
 sudo make install
 ```
 
-The `Makefile` allows source URLs to be overridden to include customizations from your own repositories. The `DOCKER_URL`, `PLUGINHOOK_URL`, `SSHCOMMAND_URL` and `STACK_URL` environment variables may be set to override the defaults (see the `Makefile` for how these apply). Example:
+The `Makefile` allows source URLs to be overridden to include customizations from your own repositories. The `DOCKER_URL`, `PLUGN_URL`, `SSHCOMMAND_URL` and `STACK_URL` environment variables may be set to override the defaults (see the `Makefile` for how these apply). Example:
 
 ```shell
 sudo SSHCOMMAND_URL=https://raw.github.com/yourusername/sshcommand/master/sshcommand make install
@@ -32,14 +32,14 @@ chmod +x bootstrap.sh
 sudo DOKKU_REPO=https://github.com/yourusername/dokku.git DOKKU_BRANCH=master ./bootstrap.sh
 ```
 
-## Custom buildstep build
+## Custom herokuish build
 
-Dokku ships with a pre-built version of version of the [buildstep](https://github.com/progrium/buildstep) component by default. If you want to build your own version you can specify that with an env variable.
+Dokku ships with a pre-built version of version of the [herokuish](https://github.com/gliderlabs/herokuish) component by default. If you want to build your own version you can specify that with an env variable.
 
 ```shell
 git clone https://github.com/progrium/dokku.git
 cd dokku
-sudo BUILD_STACK=true STACK_URL=https://github.com/progrium/buildstep.git make install
+sudo BUILD_STACK=true STACK_URL=https://github.com/gliderlabs/herokuish.git make install
 ```
 
 ## Configuring
@@ -57,3 +57,25 @@ If you are using the vagrant installation, you can use the following command to 
     $ cat ~/.ssh/id_rsa.pub | make vagrant-acl-add
 
 That's it!
+
+## VMs with less than 1GB of memory
+
+Having less than 1GB of system memory available for dokku and its containers, for example Digital Ocean's small 512MB machines, might result in unexpected errors, such as **! [remote rejected] master -> master (pre-receive hook declined)** during installation of NPM dependencies (https://github.com/npm/npm/issues/3867).
+
+To work around this issue, it might suffice to augment the linux swap file size to a maximum of twice the physical memory size.
+
+To resize the swap file of a 512MB machine to 1GB, follow these steps while in SSH within your machine:
+
+```shell
+cd /var
+touch swap.img
+chmod 600 swap.img
+
+dd if=/dev/zero of=/var/swap.img bs=1024k count=1000
+mkswap /var/swap.img
+swapon /var/swap.img
+free
+
+echo "/var/swap.img    none    swap    sw    0    0" >> /etc/fstab
+```
+Reference: https://www.digitalocean.com/community/tutorials/how-to-configure-virtual-memory-swap-file-on-a-vps

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+[[ " shell help shell:help " == *" $1 "* ]] || exit $DOKKU_NOT_IMPLEMENTED_EXIT
 set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
 
 case "$1" in
@@ -25,20 +26,21 @@ case "$1" in
       line=$(echo $line | trim)
       CMD=$(echo $line | awk '{ print $1 }')
 
-      [ -z $CMD ] && continue
+      [[ -z $CMD ]] && continue
 
       [[ "$line" != "$(fc -ln -1 | trim)" ]] && history -s "$line"
 
       case $CMD in
-    # shell builtins
+        # shell builtins
         clear)
           clear
           ;;
+
         quit|exit)
           break
           ;;
 
-    # Not a built-in, run as regular dokku command
+        # Not a built-in, run as regular dokku command
         *)
           dokku $line || true
       esac
@@ -47,8 +49,8 @@ case "$1" in
     ;;
 
   help | shell:help)
-    cat && cat<<EOF
-    shell                                           Spawn dokku shell
+    cat<<EOF
+    shell, Spawn dokku shell
 EOF
     ;;
 

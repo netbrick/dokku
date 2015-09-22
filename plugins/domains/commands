@@ -1,57 +1,45 @@
 #!/usr/bin/env bash
+[[ " domains domains:setup domains:add domains:clear domains:remove help domains:help " == *" $1 "* ]] || exit $DOKKU_NOT_IMPLEMENTED_EXIT
 set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
-source "$(dirname $0)/../common/functions"
-
-RE_IPV4="([0-9]{1,3}[\.]){3}[0-9]{1,3}"
-
-RE_IPV6="([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|"                    # TEST: 1:2:3:4:5:6:7:8
-RE_IPV6="${RE_IPV6}([0-9a-fA-F]{1,4}:){1,7}:|"                         # TEST: 1::                              1:2:3:4:5:6:7::
-RE_IPV6="${RE_IPV6}([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|"         # TEST: 1::8             1:2:3:4:5:6::8  1:2:3:4:5:6::8
-RE_IPV6="${RE_IPV6}([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|"  # TEST: 1::7:8           1:2:3:4:5::7:8  1:2:3:4:5::8
-RE_IPV6="${RE_IPV6}([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|"  # TEST: 1::6:7:8         1:2:3:4::6:7:8  1:2:3:4::8
-RE_IPV6="${RE_IPV6}([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|"  # TEST: 1::5:6:7:8       1:2:3::5:6:7:8  1:2:3::8
-RE_IPV6="${RE_IPV6}([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|"  # TEST: 1::4:5:6:7:8     1:2::4:5:6:7:8  1:2::8
-RE_IPV6="${RE_IPV6}[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|"       # TEST: 1::3:4:5:6:7:8   1::3:4:5:6:7:8  1::8
-RE_IPV6="${RE_IPV6}:((:[0-9a-fA-F]{1,4}){1,7}|:)|"                     # TEST: ::2:3:4:5:6:7:8  ::2:3:4:5:6:7:8 ::8       ::
-RE_IPV6="${RE_IPV6}fe08:(:[0-9a-fA-F]{1,4}){2,2}%[0-9a-zA-Z]{1,}|"     # TEST: fe08::7:8%eth0      fe08::7:8%1                                      (link-local IPv6 addresses with zone index)
-RE_IPV6="${RE_IPV6}::(ffff(:0{1,4}){0,1}:){0,1}${RE_IPV4}|"            # TEST: ::255.255.255.255   ::ffff:255.255.255.255  ::ffff:0:255.255.255.255 (IPv4-mapped IPv6 addresses and IPv4-translated addresses)
-RE_IPV6="${RE_IPV6}([0-9a-fA-F]{1,4}:){1,4}:${RE_IPV4}"                # TEST: 2001:db8:3:4::192.0.2.33  64:ff9b::192.0.2.33
-
-# Ensure the ip address continues to the end of the line
-# Fixes using a wildcard dns service such as xip.io which allows for *.<ip address>.xip.io
-RE_IPV4="${RE_IPV4}\$"
-RE_IPV6="${RE_IPV6}\$"
+source "$PLUGIN_CORE_AVAILABLE_PATH/common/functions"
+source "$PLUGIN_AVAILABLE_PATH/domains/functions"
+source "$PLUGIN_AVAILABLE_PATH/nginx-vhosts/functions"
 
 case "$1" in
   domains)
-    [[ -z $2 ]] && echo "Please specify an app to run the command on" && exit 1
+    [[ -z $2 ]] && dokku_log_fail "Please specify an app to run the command on"
     verify_app_name "$2"
     APP="$2"
 
     dokku domains:setup $APP
-    dokku_log_info2_quiet "$APP Domain Names"
-    cat "$DOKKU_ROOT/$APP/VHOST"
+    if [[ -f "$DOKKU_ROOT/$APP/VHOST" ]]; then
+      dokku_log_info2_quiet "$APP Domain Names"
+      get_app_domains "$APP"
+    else
+      dokku_log_fail "No domain names set for $APP"
+    fi
     ;;
 
   domains:setup)
-    [[ -z $2 ]] && echo "Please specify an app to run the command on" && exit 1
+    [[ -z $2 ]] && dokku_log_fail "Please specify an app to run the command on"
     verify_app_name "$2"
     APP="$2"; VHOST_PATH="$DOKKU_ROOT/$APP/VHOST"
+    RE_IPV4="$(get_ipv4_regex)"; RE_IPV6="$(get_ipv6_regex)"
 
     if [[ ! -f $VHOST_PATH ]]; then
-      if [[ -f "$DOKKU_ROOT/VHOST" ]];then
+      if [[ -f "$DOKKU_ROOT/VHOST" ]]; then
         VHOST=$(< "$DOKKU_ROOT/VHOST")
       else
         VHOST=$(< "$DOKKU_ROOT/HOSTNAME")
       fi
-      if [[ "$VHOST" =~ $RE_IPV4 ]] || [[ "$VHOST" =~ $RE_IPV6 ]];then
+      if [[ "$VHOST" =~ $RE_IPV4 ]] || [[ "$VHOST" =~ $RE_IPV6 ]]; then
         dokku_log_info2 "unsupported vhost config found. disabling vhost support"
-        dokku config:set-norestart $APP NO_VHOST=1
+        disable_app_vhost $APP --no-restart $APP
       else
         if [[ -f "$DOKKU_ROOT/VHOST" ]]; then
           dokku_log_info1 "Creating new $VHOST_PATH..."
           SUBDOMAIN=${APP/%\.${VHOST}/}
-          hostname=$(: | pluginhook nginx-hostname $APP $SUBDOMAIN $VHOST)
+          hostname=$(: | plugn trigger nginx-hostname $APP $SUBDOMAIN $VHOST)
           if [[ ! -n $hostname ]]; then
             if [[ "$APP" == *.* ]] && [[ "$SUBDOMAIN" == "$APP" ]]; then
               hostname="${APP/\//-}"
@@ -67,7 +55,7 @@ case "$1" in
     ;;
 
   domains:add)
-    [[ -z $2 ]] && echo "Please specify an app to run the command on" && exit 1
+    [[ -z $2 ]] && dokku_log_fail "Please specify an app to run the command on"
     verify_app_name "$2"
     APP="$2"
 
@@ -84,32 +72,32 @@ case "$1" in
 
     shift 2
     dokku domains:setup $APP
-    for DOMAIN in "$@";do
+    for DOMAIN in "$@"; do
       echo "$DOMAIN" >> "$DOKKU_ROOT/$APP/VHOST"
     done
     # we need to restart the app to make sure we're binding to the appropriate network interface
-    dokku nginx:build-config $APP
-    pluginhook post-domains-update $APP
-    for DOMAIN in "$@";do
+    nginx_build_config $APP
+    plugn trigger post-domains-update $APP
+    for DOMAIN in "$@"; do
       dokku_log_info1 "Added $DOMAIN to $APP"
     done
 
     ;;
 
   domains:clear)
-    [[ -z $2 ]] && echo "Please specify an app to run the command on" && exit 1
+    [[ -z $2 ]] && dokku_log_fail "Please specify an app to run the command on"
     verify_app_name "$2"
     APP="$2"
 
     rm -f "$DOKKU_ROOT/$APP/VHOST"
     dokku domains:setup $APP
-    pluginhook post-domains-update $APP
+    plugn trigger post-domains-update $APP
     dokku_log_info1 "Cleared domains in $APP"
 
     ;;
 
   domains:remove)
-    [[ -z $2 ]] && echo "Please specify an app to run the command on" && exit 1
+    [[ -z $2 ]] && dokku_log_fail "Please specify an app to run the command on"
     verify_app_name "$2"
     APP="$2"
 
@@ -121,22 +109,22 @@ case "$1" in
 
     shift 2
     dokku domains:setup $APP
-    for DOMAIN in "$@";do
+    for DOMAIN in "$@"; do
       sed -i "/^$DOMAIN$/d" "$DOKKU_ROOT/$APP/VHOST"
     done
-    pluginhook post-domains-update $APP
-    for DOMAIN in "$@";do
+    plugn trigger post-domains-update $APP
+    for DOMAIN in "$@"; do
       dokku_log_info1 "Removed $DOMAIN from $APP"
     done
 
     ;;
 
   help | domains:help)
-    cat && cat<<EOF
-    domains <app>                                   List custom domains for app
-    domains:add <app> DOMAIN                        Add a custom domain to app
-    domains:clear <app>                             Clear all custom domains for app
-    domains:remove <app> DOMAIN                     Remove a custom domain from app
+    cat<<EOF
+    domains <app>, List custom domains for app
+    domains:add <app> DOMAIN, Add a custom domain to app
+    domains:clear <app>, Clear all custom domains for app
+    domains:remove <app> DOMAIN, Remove a custom domain from app
 EOF
     ;;
 
