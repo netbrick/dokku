@@ -3,6 +3,7 @@ set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
 
 case "$DOKKU_DISTRO" in
   ubuntu)
+  debian)
     sudo /etc/init.d/nginx reload > /dev/null
     ;;
 

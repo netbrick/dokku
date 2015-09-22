@@ -3,7 +3,7 @@ set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
 
 if [[ ! -f /etc/sudoers.d/dokku-nginx ]]; then
   case "$DOKKU_DISTRO" in
-    ubuntu)
+    ubuntu|debian)
       echo "%dokku ALL=(ALL) NOPASSWD:/etc/init.d/nginx reload" >> /etc/sudoers.d/dokku-nginx
       ;;
 
@@ -66,7 +66,7 @@ EOF
 echo 'server_names_hash_bucket_size 512;' >| /etc/nginx/conf.d/server_names_hash_bucket_size.conf
 
 case "$DOKKU_DISTRO" in
-  ubuntu)
+  ubuntu|debian)
     /etc/init.d/nginx start
     ;;
 
