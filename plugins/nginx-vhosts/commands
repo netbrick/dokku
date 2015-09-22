@@ -16,6 +16,7 @@ validate_nginx () {
 restart_nginx () {
   case "$DOKKU_DISTRO" in
     ubuntu)
+    debian)
       sudo /etc/init.d/nginx reload > /dev/null
       ;;
 

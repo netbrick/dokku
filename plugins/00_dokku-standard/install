@@ -12,7 +12,7 @@ fi
 # temporary hack for https://github.com/progrium/dokku/issues/82
 # redeploys all apps after a reboot
 case "$DOKKU_DISTRO" in
-  ubuntu)
+  ubuntu|debian)
     cat<<EOF > /etc/init/dokku-redeploy.conf
 description "Dokku app redeploy service"
 

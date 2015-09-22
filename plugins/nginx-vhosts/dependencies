@@ -10,7 +10,13 @@ case "$DOKKU_DISTRO" in
     apt-get update
     apt-get install -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" --force-yes -qq -y nginx dnsutils
     ;;
-
+  debian)
+    export DEBIAN_FRONTEND=noninteractive
+    echo "deb http://nginx.org/packages/debian/ wheezy nginx" > /etc/apt/sources.list.d/nginx.list
+    wget -O - http://nginx.org/keys/nginx_signing.key | apt-key add -
+    apt-get update
+    apt-get install -y nginx dnsutils
+    ;;
   opensuse)
     zypper -q in -y nginx bind-utils
     ;;

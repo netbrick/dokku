@@ -2,12 +2,12 @@
 set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
 
 case "$DOKKU_DISTRO" in
-  ubuntu)
-    echo "%dokku ALL=(ALL) NOPASSWD:/etc/init.d/nginx reload, /usr/sbin/nginx -t" > /etc/sudoers.d/dokku-nginx
+  ubuntu|debian)
+    echo "%dokku ALL=(ALL) NOPASSWD:/etc/init.d/nginx reload" >> /etc/sudoers.d/dokku-nginx
     ;;
 
   opensuse)
-    echo "%dokku ALL=(ALL) NOPASSWD:/sbin/service nginx reload, /usr/sbin/nginx -t" > /etc/sudoers.d/dokku-nginx
+    echo "%dokku ALL=(ALL) NOPASSWD:/sbin/service nginx reload" >> /etc/sudoers.d/dokku-nginx
     ;;
 esac
 
@@ -64,7 +64,7 @@ EOF
 echo 'server_names_hash_bucket_size 512;' >| /etc/nginx/conf.d/server_names_hash_bucket_size.conf
 
 case "$DOKKU_DISTRO" in
-  ubuntu)
+  ubuntu|debian)
     /etc/init.d/nginx start
     ;;
 
